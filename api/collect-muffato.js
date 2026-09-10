@@ -16,18 +16,38 @@ function normalizeKey(value) {
 }
 
 function categoryFor(product) {
-  const path = [...(product.categories || []), product.productName || ''].join(' ').toLowerCase();
-  if (/carne|ave|frango|su[ií]n|bovin|peixe|salm[aã]o|lingui[cç]a/.test(path)) return 'Carnes';
-  if (/frios|embut|presunto|salame|mortadela|bacon|peito de peru/.test(path)) return 'Frios e Embutidos';
-  if (/latic[ií]n|leite|iogurte|manteiga|margarina|queijo|requeij|creme de leite|bebida l[aá]ctea/.test(path)) return 'Laticínios';
-  if (/bebida|refrigerante|suco|[aá]gua|mineral|energ[eé]tico|isot[oô]nico|cerveja|vinho/.test(path)) return 'Bebidas';
-  if (/doce|chocolate|bombom|biscoito|cookie|wafer|sobremesa|confeito|balas|chiclete/.test(path)) return 'Doces e Chocolates';
-  if (/hortifruti|fruta|verdura|legume|hortali[cç]a/.test(path)) return 'Hortifruti';
-  if (/congelad|sorvete|pizza congelada/.test(path)) return 'Congelados';
-  if (/padaria|p[aã]o|bolo|torta/.test(path)) return 'Padaria';
-  if (/limpeza|detergente|amaciante|desinfetante|lava roupa|tira manchas/.test(path)) return 'Limpeza';
-  if (/higiene|beleza|shampoo|condicionador|sabonete|desodorante|creme dental/.test(path)) return 'Higiene e Beleza';
-  if (/mercearia|alimentos|arroz|feij[aã]o|massa|macarr[aã]o|caf[eé]|ch[aá]|molho|tempero|conserva|farinha|a[cç][uú]car|[oó]leo|azeite|cereal|salgadinho|amendoim/.test(path)) return 'Mercearia';
+  const categories = (product.categories || []).join(' ').toLowerCase();
+  const name = String(product.productName || '').toLowerCase();
+
+  // A árvore oficial do Muffato é a fonte principal de classificação.
+  // Isso evita falsos positivos de texto, como "suave" contendo "ave"
+  // ou ração "sabor carne" sendo classificada como carne humana.
+  if (/pet shop|c[aã]es|gatos|ra[cç][aã]o/.test(categories)) return 'Outros';
+  if (/higiene e beleza|cuidados pessoais|perfumaria/.test(categories)) return 'Higiene e Beleza';
+  if (/limpeza|lavanderia/.test(categories)) return 'Limpeza';
+  if (/doces e chocolates|chocolates e bombons|balas|chicletes/.test(categories)) return 'Doces e Chocolates';
+  if (/frios e latic[ií]nios|latic[ií]nios|leites|iogurtes|queijos|manteigas|margarinas/.test(categories)) return 'Laticínios';
+  if (/frios|embutidos|presuntos|salames|mortadelas/.test(categories)) return 'Frios e Embutidos';
+  if (/carnes, aves e peixes|carnes bovinas|carnes su[ií]nas|aves e frangos|peixes e frutos do mar|a[cç]ougue/.test(categories)) return 'Carnes';
+  if (/bebidas|refrigerantes|sucos|cervejas|vinhos|[aá]guas|energ[eé]ticos/.test(categories)) return 'Bebidas';
+  if (/hortifruti|frutas|verduras|legumes|hortali[cç]as/.test(categories)) return 'Hortifruti';
+  if (/congelados|sorvetes/.test(categories)) return 'Congelados';
+  if (/padaria|p[aã]es|confeitaria/.test(categories)) return 'Padaria';
+  if (/mercearia e alimentos|mercearia|alimentos/.test(categories)) return 'Mercearia';
+
+  // Fallback apenas quando a árvore de categorias não ajuda.
+  if (/alimento para c[aã]es|alimento para gatos|petisco para c[aã]es|petisco para gatos|ra[cç][aã]o/.test(name)) return 'Outros';
+  if (/absorvente|shampoo|condicionador|sabonete|desodorante|creme dental/.test(name)) return 'Higiene e Beleza';
+  if (/detergente|amaciante|desinfetante|sab[aã]o|lava roupa|tira manchas/.test(name)) return 'Limpeza';
+  if (/chocolate|bombom|biscoito|cookie|wafer|sobremesa|confeito|bala|chiclete/.test(name)) return 'Doces e Chocolates';
+  if (/presunto|salame|mortadela|bacon|peito de peru/.test(name)) return 'Frios e Embutidos';
+  if (/leite|iogurte|manteiga|margarina|queijo|requeij|creme de leite|bebida l[aá]ctea/.test(name)) return 'Laticínios';
+  if (/carne|frango|su[ií]n|bovin|peixe|salm[aã]o|til[aá]pia|camar[aã]o|lingui[cç]a|bisteca|costela|lombo|fil[eé] mignon/.test(name)) return 'Carnes';
+  if (/refrigerante|suco|[aá]gua mineral|energ[eé]tico|isot[oô]nico|cerveja|vinho/.test(name)) return 'Bebidas';
+  if (/alface|tomate|uva|manga|banana|ma[cç][aã]|laranja|batata|cebola|cenoura|verdura|legume|fruta/.test(name)) return 'Hortifruti';
+  if (/congelad|sorvete|pizza congelada/.test(name)) return 'Congelados';
+  if (/p[aã]o|bolo|torta/.test(name)) return 'Padaria';
+  if (/arroz|feij[aã]o|massa|macarr[aã]o|caf[eé]|ch[aá]|molho|tempero|conserva|farinha|a[cç][uú]car|[oó]leo|azeite|cereal|salgadinho|amendoim|aveia/.test(name)) return 'Mercearia';
   return 'Outros';
 }
 
