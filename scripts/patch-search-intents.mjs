@@ -2,9 +2,10 @@ import fs from 'node:fs';
 
 const path = 'api/telegram.js';
 let source = fs.readFileSync(path, 'utf8');
-const start = source.indexOf('async function searchOffers(sql, term, limit = 10) {');
-const end = source.indexOf('\nasync function fetchBiggestDiscounts', start);
-if (start < 0 || end < 0) throw new Error('searchOffers block not found');
+const start = source.indexOf('const PRODUCT_INTENTS = {');
+const searchStart = start >= 0 ? start : source.indexOf('async function searchOffers(sql, term, limit = 10) {');
+const end = source.indexOf('\nasync function fetchBiggestDiscounts', searchStart);
+if (searchStart < 0 || end < 0) throw new Error('searchOffers block not found');
 
 const replacement = `const PRODUCT_INTENTS = {
   leite: {
@@ -17,15 +18,15 @@ const replacement = `const PRODUCT_INTENTS = {
   },
   tomate: {
     accept: /(^|[^a-z])tomate([^a-z]|$)/,
-    reject: /(molho|extrato|ketchup|tomate pelado|tomate seco|polpa|suco|tempero|sopa)/
+    reject: /(molho|extrato|ketchup|tomate pelado|tomate seco|polpa|suco|tempero|sopa|macarrao instantaneo|miojo|sabor tomate|aroma)/
   },
   uva: {
     accept: /(^|[^a-z])uva([^a-z]|$)/,
-    reject: /(suco|nectar|refresco|bebida|refrigerante|vinho|espumante|gelatina|iogurte|leite fermentado|sabor uva|aroma)/
+    reject: /(suco|nectar|refresco|bebida|refrigerante|vinho|espumante|gelatina|iogurte|leite fermentado|polpa|isotonico|energetico|sabor uva|aroma)/
   },
   manga: {
     accept: /(^|[^a-z])manga([^a-z]|$)/,
-    reject: /(suco|nectar|refresco|bebida|polpa|sorvete|iogurte|sabor manga|aroma)/
+    reject: /(suco|nectar|refresco|bebida|polpa|sorvete|iogurte|cha|sabor manga|aroma)/
   },
   maionese: {
     accept: /(^|[^a-z])maionese([^a-z]|$)/,
@@ -81,6 +82,6 @@ async function searchOffers(sql, term, limit = 10) {
 }
 `;
 
-source = source.slice(0, start) + replacement + source.slice(end);
+source = source.slice(0, searchStart) + replacement + source.slice(end);
 fs.writeFileSync(path, source);
 console.log('search intent engine installed');
