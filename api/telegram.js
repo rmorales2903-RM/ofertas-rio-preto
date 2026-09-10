@@ -2,7 +2,6 @@ import { neon } from '@neondatabase/serverless';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const DATABASE_URL = process.env.DATABASE_URL;
-const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
 
 function json(res, status, body) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -21,11 +20,6 @@ async function sendTelegram(chatId, text) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'method_not_allowed' });
   if (!BOT_TOKEN || !DATABASE_URL) return json(res, 500, { ok: false, error: 'missing_env' });
-
-  if (WEBHOOK_SECRET) {
-    const header = req.headers['x-telegram-bot-api-secret-token'];
-    if (header !== WEBHOOK_SECRET) return json(res, 401, { ok: false, error: 'invalid_secret' });
-  }
 
   try {
     const update = req.body || {};
