@@ -175,7 +175,7 @@ async function searchOffers(sql, term, limit = 10) {
       where o.is_active = true
         and (o.valid_until is null or o.valid_until >= current_date)
         and translate(lower(coalesce(p.canonical_name, o.source_product_name, '')), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') ~ '(^|[^a-z])leite([^a-z]|$)'
-        and translate(lower(coalesce(p.canonical_name, o.source_product_name, '')), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') !~ '(chocolate|ao leite|doce de leite|creme de leite|leite condensado|leite em po|leite po|leite fermentado|cafe com leite|bebida lactea|sabonete|desodorante|racao|leite de coco|pudim)'
+        and translate(lower(coalesce(p.canonical_name, o.source_product_name, '')), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') !~ '(chocolate|ao leite|doce de leite|creme de leite|leite condensado|leite em po|leite po|leite fermentado|cafe com leite|bebida lactea|sabonete|desodorante|racao|alimento para gato|alimento para gatos|alimento para cao|alimento para caes|whiskas|pedigree|leite de coco|pudim)'
       order by o.offer_price desc,
         case when o.regular_price > o.offer_price
           then (o.regular_price - o.offer_price) / o.regular_price
