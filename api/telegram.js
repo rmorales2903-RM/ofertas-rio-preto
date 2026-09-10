@@ -10,7 +10,8 @@ const MENU = {
     [{ text: '🍫 Doces e Chocolates' }, { text: '🛒 Mercearia' }],
     [{ text: '🥬 Hortifruti' }, { text: '❄️ Congelados' }],
     [{ text: '🔥 Maiores descontos %' }, { text: '🏆 Melhor preço' }],
-    [{ text: '⭐ Favoritos' }, { text: '📋 Menu' }]
+    [{ text: '⭐ Favoritos' }, { text: '📝 Lista de compras' }],
+    [{ text: '📋 Menu' }]
   ],
   resize_keyboard: true,
   is_persistent: true
@@ -59,6 +60,19 @@ function normalizeSearch(value) {
     .trim();
 }
 
+async function telegramApi(method, payload) {
+  const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => '');
+    throw new Error(`Telegram ${method} failed: ${r.status} ${body}`);
+  }
+  return r.json().catch(() => ({}));
+}
+
 async function sendTelegram(chatId, text, replyMarkup = undefined) {
   const payload = {
     chat_id: chatId,
@@ -67,20 +81,16 @@ async function sendTelegram(chatId, text, replyMarkup = undefined) {
     disable_web_page_preview: true
   };
   if (replyMarkup) payload.reply_markup = replyMarkup;
-
-  const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (!r.ok) {
-    const body = await r.text().catch(() => '');
-    throw new Error(`Telegram sendMessage failed: ${r.status} ${body}`);
-  }
+  return telegramApi('sendMessage', payload);
 }
 
-function formatOffer(o, index) {
+async function answerCallbackQuery(callbackQueryId, text = undefined) {
+  const payload = { callback_query_id: callbackQueryId };
+  if (text) payload.text = text;
+  return telegramApi('answerCallbackQuery', payload);
+}
+
+function formatOffer(o, index = null) {
   const regular = o.regular_price ? Number(o.regular_price) : null;
   const offer = Number(o.offer_price);
   const discount = regular && regular > offer
@@ -100,8 +110,9 @@ function formatOffer(o, index) {
   const link = o.source_url
     ? `\n🔗 <a href="${escapeHtml(o.source_url)}">Ver oferta</a>`
     : '';
+  const prefix = index ? `${index}. ` : '';
 
-  return `${index}. <b>${escapeHtml(o.canonical_name || o.source_product_name)}</b>\n🏪 ${escapeHtml(o.supermarket)} — ${escapeHtml(o.store)}${oldPrice}\n💰 <b>${brl(offer)}</b>${discountLine}${club}${validLine}${link}`;
+  return `${prefix}<b>${escapeHtml(o.canonical_name || o.source_product_name)}</b>\n🏪 ${escapeHtml(o.supermarket)} — ${escapeHtml(o.store)}${oldPrice}\n💰 <b>${brl(offer)}</b>${discountLine}${club}${validLine}${link}`;
 }
 
 async function fetchOffers(sql, category = null, limit = 5) {
@@ -206,8 +217,20 @@ async function sendOfferList(chatId, title, offers) {
     return;
   }
 
-  const text = `🛒 <b>${escapeHtml(title)}</b>\n\n${offers.map((o, i) => formatOffer(o, i + 1)).join('\n\n')}`;
-  await sendTelegram(chatId, text, MENU);
+  await sendTelegram(chatId, `🛒 <b>${escapeHtml(title)}</b>`, MENU);
+
+  for (let i = 0; i < offers.length; i++) {
+    const o = offers[i];
+    await sendTelegram(
+      chatId,
+      formatOffer(o, i + 1),
+      {
+        inline_keyboard: [[
+          { text: '🛒 Adicionar à lista', callback_data: `shopping:add:${o.id}` }
+        ]]
+      }
+    );
+  }
 }
 
 async function sendFavorites(chatId, sql, telegramUserId) {
@@ -241,6 +264,122 @@ async function sendFavorites(chatId, sql, telegramUserId) {
   );
 }
 
+async function sendShoppingList(chatId, sql, telegramUserId) {
+  const rows = await sql`
+    select sli.id as list_item_id, sli.offer_id, sli.quantity,
+           o.source_product_name, o.offer_price, o.valid_until,
+           p.canonical_name, s.name as store, sm.name as supermarket
+    from shopping_list_items sli
+    join offers o on o.id = sli.offer_id
+    join stores s on s.id = o.store_id
+    join supermarkets sm on sm.id = s.supermarket_id
+    left join products p on p.id = o.product_id
+    where sli.telegram_user_id = ${telegramUserId}
+      and sli.is_active = true
+    order by sm.name asc, s.name asc, o.offer_price desc,
+             coalesce(p.canonical_name, o.source_product_name) asc
+  `;
+
+  if (!rows.length) {
+    await sendTelegram(
+      chatId,
+      '📝 <b>Lista de compras</b>\n\nSua lista está vazia. Pesquise um produto e toque em <b>🛒 Adicionar à lista</b>.',
+      MENU
+    );
+    return;
+  }
+
+  await sendTelegram(chatId, '📝 <b>Lista de compras</b>\n\nProdutos separados por mercado:', MENU);
+
+  let currentGroup = '';
+  for (const row of rows) {
+    const group = `${row.supermarket} — ${row.store}`;
+    if (group !== currentGroup) {
+      currentGroup = group;
+      await sendTelegram(chatId, `🏪 <b>${escapeHtml(group)}</b>`);
+    }
+
+    const validity = dateBr(row.valid_until);
+    const validLine = validity ? `\n📅 Oferta até: ${validity}` : '';
+    await sendTelegram(
+      chatId,
+      `<b>${escapeHtml(row.canonical_name || row.source_product_name)}</b>\n💰 <b>${brl(row.offer_price)}</b>${validLine}`,
+      {
+        inline_keyboard: [[
+          { text: '❌ Tirar da lista', callback_data: `shopping:remove:${row.offer_id}` }
+        ]]
+      }
+    );
+  }
+}
+
+async function ensureTelegramUser(sql, chatId, displayName) {
+  const users = await sql`
+    insert into telegram_users (telegram_chat_id, display_name, is_active)
+    values (${chatId}, ${displayName}, true)
+    on conflict (telegram_chat_id)
+    do update set display_name = excluded.display_name, is_active = true
+    returning id
+  `;
+  return users[0].id;
+}
+
+async function handleShoppingCallback(callbackQuery, sql) {
+  const data = String(callbackQuery.data || '');
+  const match = data.match(/^shopping:(add|remove):(\d+)$/);
+  if (!match) return false;
+
+  const chatId = Number(callbackQuery.message?.chat?.id || callbackQuery.from?.id);
+  if (!chatId) return true;
+
+  const displayName = [callbackQuery.from?.first_name, callbackQuery.from?.last_name]
+    .filter(Boolean)
+    .join(' ') || callbackQuery.from?.username || 'Telegram';
+  const telegramUserId = await ensureTelegramUser(sql, chatId, displayName);
+  const action = match[1];
+  const offerId = Number(match[2]);
+
+  if (action === 'add') {
+    const offers = await sql`
+      select o.id, coalesce(p.canonical_name, o.source_product_name) as name
+      from offers o
+      left join products p on p.id = o.product_id
+      where o.id = ${offerId}
+      limit 1
+    `;
+
+    if (!offers.length) {
+      await answerCallbackQuery(callbackQuery.id, 'Oferta não encontrada.');
+      return true;
+    }
+
+    await sql`
+      insert into shopping_list_items (telegram_user_id, offer_id, quantity, is_active, updated_at)
+      values (${telegramUserId}, ${offerId}, 1, true, now())
+      on conflict (telegram_user_id, offer_id)
+      do update set is_active = true, updated_at = now()
+    `;
+
+    await answerCallbackQuery(callbackQuery.id, 'Adicionado à lista.');
+    await sendTelegram(
+      chatId,
+      `✅ <b>${escapeHtml(offers[0].name)}</b> foi adicionado à sua lista de compras.`,
+      MENU
+    );
+    return true;
+  }
+
+  await sql`
+    update shopping_list_items
+    set is_active = false, updated_at = now()
+    where telegram_user_id = ${telegramUserId}
+      and offer_id = ${offerId}
+  `;
+  await answerCallbackQuery(callbackQuery.id, 'Removido da lista.');
+  await sendTelegram(chatId, '❌ Item retirado da lista de compras.', MENU);
+  return true;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return json(res, 405, { ok: false, error: 'method_not_allowed' });
@@ -251,6 +390,14 @@ export default async function handler(req, res) {
 
   try {
     const update = req.body || {};
+    const sql = neon(DATABASE_URL);
+
+    if (update.callback_query) {
+      const handled = await handleShoppingCallback(update.callback_query, sql);
+      if (!handled) await answerCallbackQuery(update.callback_query.id);
+      return json(res, 200, { ok: true });
+    }
+
     const message = update.message || update.edited_message;
     if (!message?.chat?.id) return json(res, 200, { ok: true, ignored: true });
 
@@ -260,16 +407,7 @@ export default async function handler(req, res) {
       .join(' ') || message.from?.username || 'Telegram';
     const rawText = String(message.text || '').trim();
     const text = rawText.toLowerCase();
-    const sql = neon(DATABASE_URL);
-
-    const users = await sql`
-      insert into telegram_users (telegram_chat_id, display_name, is_active)
-      values (${chatId}, ${displayName}, true)
-      on conflict (telegram_chat_id)
-      do update set display_name = excluded.display_name, is_active = true
-      returning id
-    `;
-    const telegramUserId = users[0].id;
+    const telegramUserId = await ensureTelegramUser(sql, chatId, displayName);
 
     if (
       text === '/start' || text === 'oi' || text === 'olá' || text === 'ola' ||
@@ -277,7 +415,7 @@ export default async function handler(req, res) {
     ) {
       await sendTelegram(
         chatId,
-        '🛒 <b>Promo Supermercado</b>\n\nEscolha uma categoria ou simplesmente digite o produto que procura, por exemplo: <code>leite</code>, <code>nescau</code>, <code>macarrão</code>, <code>maionese</code>, <code>alface</code>, <code>manga</code>, <code>uva</code> ou <code>tomate</code>. Nas buscas, os resultados aparecem do maior para o menor preço, deixando os mais baratos no final da mensagem.',
+        '🛒 <b>Promo Supermercado</b>\n\nEscolha uma categoria ou simplesmente digite o produto que procura, por exemplo: <code>leite</code>, <code>nescau</code>, <code>macarrão</code>, <code>maionese</code>, <code>alface</code>, <code>manga</code>, <code>uva</code> ou <code>tomate</code>. Nas buscas, os resultados aparecem do maior para o menor preço, deixando os mais baratos no final da conversa.',
         MENU
       );
 
@@ -328,6 +466,14 @@ export default async function handler(req, res) {
 
     if (text === '⭐ favoritos' || text === 'favoritos') {
       await sendFavorites(chatId, sql, telegramUserId);
+      return json(res, 200, { ok: true });
+    }
+
+    if (
+      text === '📝 lista de compras' || text === 'lista de compras' ||
+      text === 'lista compras' || text === 'minha lista'
+    ) {
+      await sendShoppingList(chatId, sql, telegramUserId);
       return json(res, 200, { ok: true });
     }
 
