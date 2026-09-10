@@ -1,0 +1,18 @@
+name: collect-muffato-now
+on:
+  push:
+    paths:
+      - '.automation/muffato-trigger.txt'
+      - '.github/workflows/collect-muffato-now.yml'
+  workflow_dispatch:
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect Muffato offers
+        run: |
+          set -euo pipefail
+          body=$(curl --fail --silent --show-error --max-time 120 'https://ofertas-rio-preto.vercel.app/api/collect-muffato')
+          echo "$body"
+          echo "$body" | grep -q '"ok":true'
