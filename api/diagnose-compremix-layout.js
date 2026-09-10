@@ -53,6 +53,11 @@ export default async function handler(req, res) {
     const pdfLinks = extractPdfLinks(html);
     if (!pdfLinks.length) return res.status(404).json({ ok:false, error:'no_pdfs' });
 
+    const canvas = await import('@napi-rs/canvas');
+    if (!globalThis.DOMMatrix && canvas.DOMMatrix) globalThis.DOMMatrix = canvas.DOMMatrix;
+    if (!globalThis.ImageData && canvas.ImageData) globalThis.ImageData = canvas.ImageData;
+    if (!globalThis.Path2D && canvas.Path2D) globalThis.Path2D = canvas.Path2D;
+
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
     const diagnostics = [];
 
