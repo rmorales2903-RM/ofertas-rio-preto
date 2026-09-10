@@ -7,3 +7,4 @@ if(!s.includes(old)) throw new Error('target not found');
 s=s.replace(old,neu);
 fs.writeFileSync(path,s);
 console.log('patched milk intent exclusions');
+// trigger workflow
