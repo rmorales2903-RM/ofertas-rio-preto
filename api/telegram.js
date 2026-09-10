@@ -167,7 +167,7 @@ async function searchOffers(sql, term, limit = 10) {
         or translate(lower(coalesce(o.source_product_name, '')), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') like ${pattern}
         or translate(lower(coalesce(p.brand, '')), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') like ${pattern}
       )
-    order by o.offer_price asc,
+    order by o.offer_price desc,
       case when o.regular_price > o.offer_price
         then (o.regular_price - o.offer_price) / o.regular_price
         else 0 end desc,
@@ -277,7 +277,7 @@ export default async function handler(req, res) {
     ) {
       await sendTelegram(
         chatId,
-        '🛒 <b>Promo Supermercado</b>\n\nEscolha uma categoria ou simplesmente digite o produto que procura, por exemplo: <code>leite</code>, <code>nescau</code>, <code>macarrão</code>, <code>maionese</code>, <code>alface</code>, <code>manga</code>, <code>uva</code> ou <code>tomate</code>. Nas buscas, os resultados aparecem sempre do menor para o maior preço.',
+        '🛒 <b>Promo Supermercado</b>\n\nEscolha uma categoria ou simplesmente digite o produto que procura, por exemplo: <code>leite</code>, <code>nescau</code>, <code>macarrão</code>, <code>maionese</code>, <code>alface</code>, <code>manga</code>, <code>uva</code> ou <code>tomate</code>. Nas buscas, os resultados aparecem do maior para o menor preço, deixando os mais baratos no final da mensagem.',
         MENU
       );
 
@@ -369,7 +369,7 @@ export default async function handler(req, res) {
 
     if (rawText.length >= 2 && rawText.length <= 80) {
       const offers = await searchOffers(sql, rawText, 10);
-      await sendOfferList(chatId, `Busca: ${rawText} — menor para maior preço`, offers);
+      await sendOfferList(chatId, `Busca: ${rawText} — maior para menor preço`, offers);
       return json(res, 200, { ok: true });
     }
 
