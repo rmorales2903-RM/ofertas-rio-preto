@@ -78,17 +78,34 @@ function parseValidity(text) {
 
 function categoryFor(name) {
   const n = normalizeText(name);
-  if (/\b(carne|bovina|suina|suino|frango|peito de frango|coxa|sobrecoxa|figado|picanha|file mignon|tilapia|salmao|peixe|camarao)\b/.test(n)) return 'Carnes';
+
+  // Exclusions and semantic priorities first: avoid classifying by flavor/ingredient words.
+  if (/\b(racao|alimento para cao|alimento para caes|alimento para gato|alimento para gatos|pet shop|whiskas|pedigree|special cat|vida pet)\b/.test(n)) return 'Outros';
+
+  if (/\b(shampoo|condicionador|sabonete|desodorante|absorvente|absorbente|creme dental|enxaguante bucal|escova dental|aparelho de barbear|aparelho barbear|depilar|fralda|serum|leave-in|leave in|tratamento capilar|oleo de queratina|oleo capilar|higiene)\b/.test(n)) return 'Higiene e Beleza';
+
+  if (/\b(detergente|amaciante|desinfetante|sabao|lava roupas|lava-roupas|limpador|limpa tudo|limpa vidros|desengordurante|limpeza pesada|tira manchas|papel toalha)\b/.test(n)) return 'Limpeza';
+
+  // Pantry products before ingredient words such as tomate, carne, pizza or doce.
+  if (/\b(arroz|feijao|macarrao|massa|farinha|acucar|oleo de soja|oleo de girassol|oleo misto|azeite|molho|extrato|tomate pelado|caldo|tempero|cafe|cha|milho|farofa|maionese|ketchup|mostarda|conserva|atum|sardinha|azeitona|pipoca|tapioca|adoçante|adocante|sacarina)\b/.test(n)) return 'Mercearia';
+
   if (/\b(presunto|mortadela|salame|bacon|linguica|salsicha|peito de peru)\b/.test(n)) return 'Frios e Embutidos';
+
   if (/\b(leite|iogurte|manteiga|queijo|requeijao|bebida lactea|creme de leite)\b/.test(n)) return 'Laticínios';
+
   if (/\b(refrigerante|suco|agua|cerveja|vinho|espumante|energetico|isotonico)\b/.test(n)) return 'Bebidas';
+
   if (/\b(chocolate|bombom|biscoito|cookie|wafer|doce|chiclete|bala)\b/.test(n)) return 'Doces e Chocolates';
-  if (/\b(cebola|tomate|alface|manga|uva|banana|melao|melancia|batata|cenoura|pimentao|brocolis|couve|fruta|verdura|legume)\b/.test(n)) return 'Hortifruti';
-  if (/\b(congelad|sorvete|pizza|batata palito|empanado|tekitos)\b/.test(n)) return 'Congelados';
+
+  if (/\b(cebola|alface|manga|uva|banana|melao|melancia|batata|cenoura|pimentao|brocolis|couve|fruta|verdura|legume)\b/.test(n)) return 'Hortifruti';
+  if (/\btomate\b/.test(n) && !/\b(molho|extrato|pelado|seco|ketchup)\b/.test(n)) return 'Hortifruti';
+
+  if (/\b(sorvete|pizza congelada|batata palito|empanado|tekitos|congelados?)\b/.test(n) && !/\b(peixe|tilapia|salmao|camarao|carne|frango)\b/.test(n)) return 'Congelados';
+
   if (/\b(pao|baguete|cuca|bolo|torta)\b/.test(n)) return 'Padaria';
-  if (/\b(detergente|amaciante|desinfetante|sabao|limpeza|papel toalha)\b/.test(n)) return 'Limpeza';
-  if (/\b(shampoo|condicionador|sabonete|desodorante|absorvente|creme dental|higiene)\b/.test(n)) return 'Higiene e Beleza';
-  if (/\b(arroz|feijao|macarrao|massa|farinha|acucar|oleo|azeite|molho|tempero|cafe|cha|milho|farofa|maionese|ketchup|mostarda|conserva)\b/.test(n)) return 'Mercearia';
+
+  if (/\b(panceta|carne bovina|carne suina|carne moida|bovina|suina|suino|frango|peito de frango|coxa|sobrecoxa|figado|picanha|file mignon|tilapia|salmao|peixe|camarao|bacalhau|costela|lombo|bisteca|asa)\b/.test(n)) return 'Carnes';
+
   return 'Outros';
 }
 
