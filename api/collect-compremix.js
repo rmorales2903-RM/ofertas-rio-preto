@@ -24,8 +24,8 @@ function decodeHtml(value) {
 
 function categoryFor(name) {
   const n = normalizeText(name);
-  if (/\b(racao|alimento para cao|alimento para caes|alimento para gato|alimento para gatos|pet shop|whiskas|pedigree)\b/.test(n)) return 'Outros';
-  if (/\b(shampoo|condicionador|sabonete|desodorante|absorvente|creme dental|enxaguante|escova dental|aparelho de barbear|fralda|serum|leave in|tratamento capilar|creme de tratamento|oleo de queratina|higiene)\b/.test(n)) return 'Higiene e Beleza';
+  if (/\b(racao|alimento para cao|alimento para caes|alimento para gato|alimento para gatos|pet shop|whiskas|pedigree|kitek|ottima)\b/.test(n)) return 'Outros';
+  if (/\b(shampoo|condicionador|sabonete|desod|desodorante|absorvente|creme dental|enxaguante|escova dental|aparelho de barbear|fralda|serum|leave in|tratamento capilar|creme de tratamento|oleo de queratina|papel higienico|higiene)\b/.test(n)) return 'Higiene e Beleza';
   if (/\b(detergente|amaciante|desinfetante|sabao|lava roupas|limpador|limpa tudo|limpa vidros|desengordurante|tira manchas|papel toalha|toalha de papel|agua sanitaria)\b/.test(n)) return 'Limpeza';
   if (/\b(arroz|feijao|macarrao|massa|farinha|acucar|oleo de soja|oleo de girassol|oleo misto|azeite|molho|extrato|tomate pelado|caldo|tempero|cafe|cha|milho|farofa|maionese|ketchup|mostarda|conserva|atum|sardinha|azeitona|pipoca|tapioca|adocante|sacarina|aveia|mel)\b/.test(n)) return 'Mercearia';
   if (/\b(presunto|mortadela|salame|bacon|linguica|salsicha|peito de peru)\b/.test(n)) return 'Frios e Embutidos';
@@ -80,119 +80,31 @@ function parseValidity(text) {
   return { validFrom:null, validUntil:null };
 }
 
-function moneyToNumber(value) {
-  const cleaned = String(value || '').replace(/\s+/g,'').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,'');
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
+function rawItems(items) {
+  return (items || []).filter(i => i?.str?.trim() && i.transform).map(i => ({
+    text: i.str.trim(),
+    x: Number(i.transform[4] || 0),
+    y: Number(i.transform[5] || 0)
+  }));
 }
 
-function extractPrices(text) {
-  const matches = [];
-  const re = /(?:R\s*\$\s*([0-9.]+\s*,\s*[0-9]{2})|([0-9.]+\s*,\s*[0-9]{2})\s*R\s*\$)/gi;
-  for (const m of String(text || '').matchAll(re)) {
-    const raw = m[1] || m[2];
-    const value = moneyToNumber(raw);
-    if (value != null) matches.push({ value, index:m.index || 0, length:m[0].length });
-  }
-  return matches;
+function colForX(x) {
+  if (x < 205) return 0;
+  if (x < 400) return 1;
+  if (x < 590) return 2;
+  return 3;
 }
 
-function cleanProductName(value) {
-  return String(value || '')
-    .replace(/cliente\s+clube.*$/i,'')
-    .replace(/oferta\s+especial.*$/i,'')
-    .replace(/\bcada\b/gi,' ')
-    .replace(/\s+/g,' ')
-    .replace(/^[-•*\s]+|[-•*\s]+$/g,'')
+function cleanCoordinateName(parts) {
+  return parts.join(' ')
+    .replace(/\bS?DESINFETANT\s+E\b/gi, 'DESINFETANTE')
+    .replace(/\bPAP\.HIG\b/gi, 'PAPEL HIGIENICO')
+    .replace(/\bPAP TOALHA\b/gi, 'PAPEL TOALHA')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
-function looksLikeProductName(s) {
-  const n = normalizeText(s);
-  if (s.length < 4 || s.length > 180) return false;
-  if (/^(cliente clube|cada|kg|unidade|oferta|ofertas|atacado compre mix|orgulho de ser|precos validos|siga nossas|aceitamos|televendas|horarios|mande um oi|pix|www\.|@)/i.test(s)) return false;
-  if (/^(r\$|\d+[,.]\d{2})/.test(n)) return false;
-  return /[a-zA-ZÀ-ÿ]{3}/.test(s);
-}
-
-function parseOffersFromPdfText(text, sourceUrl) {
-  const validity = parseValidity(text);
-  const lines = String(text || '').split(/\r?\n/).map(x => x.replace(/\s+/g,' ').trim()).filter(Boolean);
-  const rows = [];
-  const seen = new Set();
-
-  // Layout A: product and price on the same or adjacent lines.
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const priceMatches = extractPrices(line);
-    if (!priceMatches.length) continue;
-    if (/cliente\s+clube/i.test(line)) continue;
-
-    let namePart = line.slice(0, priceMatches[0].index).trim();
-    if (!looksLikeProductName(namePart)) {
-      const after = line.slice(priceMatches[0].index + priceMatches[0].length).trim();
-      if (looksLikeProductName(after)) namePart = after;
-    }
-    if (!looksLikeProductName(namePart)) {
-      const candidates = [lines[i-1], lines[i-2], lines[i-3], lines[i+1]].filter(Boolean).filter(looksLikeProductName);
-      namePart = candidates[0] || '';
-    }
-
-    const name = cleanProductName(namePart);
-    if (!looksLikeProductName(name)) continue;
-
-    let regular = priceMatches[0].value;
-    let offer = regular;
-    let loyaltyRequired = false;
-    let loyaltyLabel = null;
-
-    const window = [line, lines[i+1] || '', lines[i+2] || ''].join(' ');
-    const clubPrices = extractPrices(window);
-    if (/cliente\s+clube/i.test(window) && clubPrices.length > 1) {
-      const clubPrice = clubPrices[clubPrices.length - 1].value;
-      if (clubPrice > 0 && clubPrice <= regular) {
-        offer = clubPrice;
-        loyaltyRequired = true;
-        loyaltyLabel = 'Cliente CLUBE';
-      }
-    } else if (priceMatches.length >= 2) {
-      const p2 = priceMatches[priceMatches.length - 1].value;
-      if (p2 > 0 && p2 <= regular) offer = p2;
-    }
-
-    if (!offer || offer <= 0 || offer > 100000) continue;
-    const signature = `${normalizeKey(name)}|${offer}|${sourceUrl}`;
-    if (seen.has(signature)) continue;
-    seen.add(signature);
-    rows.push(buildRow(name, regular, offer, loyaltyRequired, loyaltyLabel, validity, sourceUrl, line));
-  }
-
-  // Layout B used by the current Compre Mix PDF: e.g. "CADA 5 ,99 R$ SABAO PO APYCE 2,2KG ...".
-  // Parse the flattened text by taking the product description after each price up to the next price.
-  if (!rows.length) {
-    const flat = String(text || '').replace(/\s+/g,' ').trim();
-    const prices = extractPrices(flat);
-    for (let i = 0; i < prices.length; i++) {
-      const p = prices[i];
-      const next = prices[i+1];
-      const segment = flat.slice(p.index + p.length, next ? next.index : Math.min(flat.length, p.index + p.length + 220));
-      let name = cleanProductName(segment);
-      name = name.replace(/\b(?:cada|ofertas?|validas?|enquanto houver estoque|respeitando o periodo da promocao)\b.*$/i,'').trim();
-      if (!looksLikeProductName(name)) continue;
-      if (name.length > 120) name = name.slice(0,120).trim();
-      const offer = p.value;
-      if (!offer || offer <= 0 || offer > 100000) continue;
-      const signature = `${normalizeKey(name)}|${offer}|${sourceUrl}`;
-      if (seen.has(signature)) continue;
-      seen.add(signature);
-      rows.push(buildRow(name, offer, offer, false, null, validity, sourceUrl, segment));
-    }
-  }
-
-  return rows;
-}
-
-function buildRow(name, regular, offer, loyaltyRequired, loyaltyLabel, validity, sourceUrl, sourceLine) {
+function buildRow(name, price, validity, sourceUrl, pageNumber, xCol, y) {
   return {
     canonical_name:name,
     brand:null,
@@ -200,33 +112,100 @@ function buildRow(name, regular, offer, loyaltyRequired, loyaltyLabel, validity,
     normalized_key:normalizeKey(`compremix-${name}`),
     source_product_name:name,
     source_url:sourceUrl,
-    regular_price:regular,
-    offer_price:offer,
-    loyalty_required:loyaltyRequired,
-    loyalty_label:loyaltyLabel,
+    regular_price:price,
+    offer_price:price,
+    loyalty_required:false,
+    loyalty_label:null,
     valid_from:validity.validFrom,
     valid_until:validity.validUntil,
-    source_hash:createHash('sha256').update(`compremix|${sourceUrl}|${normalizeKey(name)}|${offer}`).digest('hex').slice(0,48),
-    raw_payload:{source:'compremix-pdf',source_url:sourceUrl,source_line:String(sourceLine || '').slice(0,500)}
+    source_hash:createHash('sha256').update(`compremix|${sourceUrl}|${normalizeKey(name)}|${price}`).digest('hex').slice(0,48),
+    raw_payload:{source:'compremix-pdf-xy',source_url:sourceUrl,page:pageNumber,column:xCol+1,y:Number(y.toFixed(1))}
   };
+}
+
+function extractRowsFromCoordinates(items, validity, sourceUrl, pageNumber) {
+  const all = rawItems(items);
+  const cents = all.filter(i => /^,\d{2}$/.test(i.text));
+  const integers = all.filter(i => /^\d{1,3}$/.test(i.text));
+  const anchors = [];
+
+  for (const int of integers) {
+    const col = colForX(int.x);
+    const c = cents
+      .filter(x => colForX(x.x) === col && x.x > int.x && x.x - int.x < 75 && Math.abs(x.y - int.y) < 15)
+      .sort((a,b) => Math.abs(a.y-int.y)-Math.abs(b.y-int.y))[0];
+    if (!c) continue;
+    const price = Number(`${int.text}.${c.text.slice(1)}`);
+    if (!Number.isFinite(price) || price < 0.1 || price > 999) continue;
+    anchors.push({ col, y:(int.y+c.y)/2, price, int, cents:c });
+  }
+
+  const rows=[];
+  const seen=new Set();
+  for (const p of anchors) {
+    const parts = all
+      .filter(i => colForX(i.x) === p.col && Math.abs(i.y - p.y) <= 29)
+      .filter(i => i !== p.int && i !== p.cents)
+      .filter(i => !/^(R|\$|C|A|D)$/i.test(i.text))
+      .filter(i => !/^,\d{2}$/.test(i.text))
+      .filter(i => !/^\d{1,3}$/.test(i.text))
+      .sort((a,b) => b.y - a.y || a.x - b.x)
+      .map(i => i.text);
+
+    const name = cleanCoordinateName(parts);
+    if (!/[A-Za-zÀ-ÿ]{3}/.test(name) || name.length > 180) continue;
+    const signature=`${p.col}|${Math.round(p.y)}|${normalizeKey(name)}|${p.price}`;
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    rows.push(buildRow(name,p.price,validity,sourceUrl,pageNumber,p.col,p.y));
+  }
+  return rows;
+}
+
+async function parsePdfByCoordinates(buffer, sourceUrl) {
+  const pages=[];
+  const texts=[];
+  let pageNo=0;
+  async function pagerender(pageData) {
+    pageNo++;
+    const tc=await pageData.getTextContent({normalizeWhitespace:true,disableCombineTextItems:false});
+    pages.push({page:pageNo,items:tc.items});
+    const t=tc.items.map(i=>i.str||'').join(' ');
+    texts.push(t);
+    return t;
+  }
+  const parsed=await pdfParse(buffer,{pagerender});
+  const fullText=texts.join(' ');
+  const validity=parseValidity(fullText || parsed.text || '');
+  const rows=[];
+  for (const page of pages) rows.push(...extractRowsFromCoordinates(page.items,validity,sourceUrl,page.page));
+  return {rows,textChars:(parsed.text||fullText).length,pages:parsed.numpages,validity};
 }
 
 async function ensureStore(sql) {
   const rows = await sql`
-    with sm as (select id from supermarkets where name='Compre Mix' limit 1), ct as (select id from cities where name='São José do Rio Preto' limit 1)
+    with sm as (select id from supermarkets where name='Compre Mix' limit 1),
+         ct as (select id from cities where name='São José do Rio Preto' limit 1)
     insert into stores (supermarket_id,city_id,name,address,external_code,is_active)
     select sm.id,ct.id,${STORE_NAME},${STORE_ADDRESS},'compremix-jd-primavera',true from sm,ct
-    on conflict (supermarket_id,city_id,name) do update set address=excluded.address,external_code=excluded.external_code,is_active=true returning id`;
+    on conflict (supermarket_id,city_id,name)
+    do update set address=excluded.address,external_code=excluded.external_code,is_active=true
+    returning id`;
   if (!rows.length) throw new Error('Compre Mix or São José do Rio Preto seed not found');
   return rows[0].id;
 }
 
 async function saveBatch(sql, storeId, rows) {
   if (!rows.length) return 0;
-  const payload = JSON.stringify(rows);
+  const payload=JSON.stringify(rows);
   await sql`
     with input as (
-      select * from jsonb_to_recordset(${payload}::jsonb) as x(canonical_name text,brand text,category_name text,normalized_key text,source_product_name text,source_url text,regular_price numeric,offer_price numeric,loyalty_required boolean,loyalty_label text,valid_from date,valid_until date,source_hash text,raw_payload jsonb)
+      select * from jsonb_to_recordset(${payload}::jsonb) as x(
+        canonical_name text,brand text,category_name text,normalized_key text,
+        source_product_name text,source_url text,regular_price numeric,offer_price numeric,
+        loyalty_required boolean,loyalty_label text,valid_from date,valid_until date,
+        source_hash text,raw_payload jsonb
+      )
     ), product_input as (
       select i.*,c.id as category_id from input i left join categories c on c.name=i.category_name
     ), upsert_products as (
@@ -237,43 +216,92 @@ async function saveBatch(sql, storeId, rows) {
     ), offer_input as (
       select pi.*,up.id as product_id from product_input pi join upsert_products up using (normalized_key)
     ), upsert_offers as (
-      insert into offers (store_id,product_id,source_product_name,source_url,regular_price,offer_price,unit_price,loyalty_required,loyalty_label,valid_from,valid_until,collected_at,source_hash,raw_payload,is_active)
-      select ${storeId},product_id,source_product_name,source_url,regular_price,offer_price,null,loyalty_required,loyalty_label,coalesce(valid_from,current_date),valid_until,now(),source_hash,raw_payload,true from offer_input
-      on conflict (store_id,source_hash) do update set product_id=excluded.product_id,source_product_name=excluded.source_product_name,source_url=excluded.source_url,regular_price=excluded.regular_price,offer_price=excluded.offer_price,loyalty_required=excluded.loyalty_required,loyalty_label=excluded.loyalty_label,valid_from=excluded.valid_from,valid_until=excluded.valid_until,collected_at=excluded.collected_at,raw_payload=excluded.raw_payload,is_active=true
+      insert into offers (
+        store_id,product_id,source_product_name,source_url,regular_price,offer_price,unit_price,
+        loyalty_required,loyalty_label,valid_from,valid_until,collected_at,source_hash,raw_payload,is_active
+      )
+      select ${storeId},product_id,source_product_name,source_url,regular_price,offer_price,null,
+             loyalty_required,loyalty_label,coalesce(valid_from,current_date),valid_until,now(),source_hash,raw_payload,true
+      from offer_input
+      on conflict (store_id,source_hash) do update set
+        product_id=excluded.product_id,source_product_name=excluded.source_product_name,source_url=excluded.source_url,
+        regular_price=excluded.regular_price,offer_price=excluded.offer_price,loyalty_required=excluded.loyalty_required,
+        loyalty_label=excluded.loyalty_label,valid_from=excluded.valid_from,valid_until=excluded.valid_until,
+        collected_at=excluded.collected_at,raw_payload=excluded.raw_payload,is_active=true
       returning id,product_id,store_id,offer_price,regular_price
     )
     insert into price_history (product_id,store_id,price,regular_price,observed_at,offer_id)
     select u.product_id,u.store_id,u.offer_price,u.regular_price,now(),u.id from upsert_offers u
-    where not exists (select 1 from price_history ph where ph.product_id=u.product_id and ph.store_id=u.store_id and ph.price=u.offer_price and coalesce(ph.regular_price,-1)=coalesce(u.regular_price,-1) and ph.observed_at>now()-interval '5 hours')`;
+    where not exists (
+      select 1 from price_history ph
+      where ph.product_id=u.product_id and ph.store_id=u.store_id and ph.price=u.offer_price
+        and coalesce(ph.regular_price,-1)=coalesce(u.regular_price,-1)
+        and ph.observed_at > now()-interval '5 hours'
+    )`;
   return rows.length;
 }
 
 export default async function handler(req,res) {
   if (req.method!=='GET' && req.method!=='POST') return res.status(405).json({ok:false,error:'method_not_allowed'});
   if (!DATABASE_URL) return res.status(500).json({ok:false,error:'missing_database_url'});
-  const sql=neon(DATABASE_URL); const startedAt=new Date();
+
+  const sql=neon(DATABASE_URL);
+  const startedAt=new Date();
   try {
     const storeId=await ensureStore(sql);
     const html=await fetchText(OFFERS_URL);
     const pdfLinks=extractPdfLinks(html);
     if (!pdfLinks.length) throw new Error('No current Compre Mix PDF offers found');
-    const warnings=[]; const allRows=[]; const diagnostics=[]; let pdfsParsed=0;
+
+    const warnings=[];
+    const diagnostics=[];
+    const allRows=[];
+    let pdfsParsed=0;
+
     for (const url of pdfLinks) {
       try {
         const buffer=await fetchBuffer(url);
-        const parsed=await pdfParse(buffer);
-        const pdfText=parsed.text || '';
-        const rows=parseOffersFromPdfText(pdfText,url);
-        diagnostics.push({url,text_chars:pdfText.length,lines:pdfText.split(/\r?\n/).filter(Boolean).length,price_tokens:extractPrices(pdfText).length,rows:rows.length,sample:pdfText.replace(/\s+/g,' ').slice(0,320)});
-        if (!rows.length) continue;
-        pdfsParsed++; allRows.push(...rows);
-      } catch(e) { warnings.push({url,error:String(e?.message||e)}); }
+        const parsed=await parsePdfByCoordinates(buffer,url);
+        diagnostics.push({url,pages:parsed.pages,text_chars:parsed.textChars,rows:parsed.rows.length,valid_from:parsed.validity.validFrom,valid_until:parsed.validity.validUntil});
+        if (!parsed.rows.length) continue;
+        pdfsParsed++;
+        allRows.push(...parsed.rows);
+      } catch(e) {
+        warnings.push({url,error:String(e?.message||e)});
+      }
     }
-    const unique=new Map(); for (const row of allRows) unique.set(row.source_hash,row); const rows=[...unique.values()];
-    let saved=0; for (let i=0;i<rows.length;i+=100) saved+=await saveBatch(sql,storeId,rows.slice(i,i+100));
-    if (rows.length>0) await sql`update offers set is_active=false where store_id=${storeId} and raw_payload->>'source'='compremix-pdf' and collected_at<${startedAt.toISOString()}::timestamptz`;
-    const counts=await sql`select c.name as category,count(*)::int as offers from offers o join products p on p.id=o.product_id left join categories c on c.id=p.category_id where o.store_id=${storeId} and o.is_active=true and (o.valid_until is null or o.valid_until>=current_date) group by c.name order by offers desc,c.name`;
-    return res.status(200).json({ok:true,source:'Compre Mix',source_provider:'compremixatacado.com.br (tabloides oficiais em PDF)',store:STORE_NAME,pdfs_found:pdfLinks.length,pdfs_parsed:pdfsParsed,offers_parsed:rows.length,saved,categories:counts,warnings:warnings.slice(0,5),diagnostics:diagnostics.slice(0,3)});
+
+    const unique=new Map();
+    for (const row of allRows) unique.set(row.source_hash,row);
+    const rows=[...unique.values()];
+
+    let saved=0;
+    for (let i=0;i<rows.length;i+=100) saved+=await saveBatch(sql,storeId,rows.slice(i,i+100));
+
+    if (rows.length>0) {
+      await sql`update offers set is_active=false where store_id=${storeId} and raw_payload->>'source' like 'compremix-pdf%' and collected_at<${startedAt.toISOString()}::timestamptz`;
+    }
+
+    const counts=await sql`
+      select c.name as category,count(*)::int as offers
+      from offers o join products p on p.id=o.product_id left join categories c on c.id=p.category_id
+      where o.store_id=${storeId} and o.is_active=true and (o.valid_until is null or o.valid_until>=current_date)
+      group by c.name order by offers desc,c.name`;
+
+    return res.status(200).json({
+      ok:true,
+      source:'Compre Mix',
+      source_provider:'compremixatacado.com.br (tabloides oficiais em PDF)',
+      parser:'xy-coordinate-v1',
+      store:STORE_NAME,
+      pdfs_found:pdfLinks.length,
+      pdfs_parsed:pdfsParsed,
+      offers_parsed:rows.length,
+      saved,
+      categories:counts,
+      warnings:warnings.slice(0,5),
+      diagnostics:diagnostics.slice(0,5)
+    });
   } catch(error) {
     console.error('collect-compremix',error);
     return res.status(500).json({ok:false,error:String(error?.message||error)});
