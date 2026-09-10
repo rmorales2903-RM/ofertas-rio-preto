@@ -1,3 +1,7 @@
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 const OFFERS_URL = 'https://www.compremixatacado.com.br/ofertas/';
 
 function decodeHtml(value) {
@@ -13,7 +17,7 @@ async function fetchText(url) {
 async function fetchBuffer(url) {
   const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 Promo-Supermercado-Bot/1.0' } });
   if (!r.ok) throw new Error(`Compre Mix PDF ${r.status}: ${url}`);
-  return new Uint8Array(await r.arrayBuffer());
+  return Buffer.from(await r.arrayBuffer());
 }
 
 function extractPdfLinks(html) {
@@ -30,21 +34,18 @@ function extractPdfLinks(html) {
 
 function reconstructRows(items) {
   const rows = [];
-  for (const item of items) {
+  for (const item of items || []) {
     if (!item?.str?.trim() || !item.transform) continue;
     const x = Number(item.transform[4] || 0);
     const y = Number(item.transform[5] || 0);
     let row = rows.find(r => Math.abs(r.y - y) <= 2.5);
-    if (!row) {
-      row = { y, items: [] };
-      rows.push(row);
-    }
+    if (!row) { row = { y, items: [] }; rows.push(row); }
     row.items.push({ x, text: item.str.trim() });
   }
-  return rows
-    .sort((a,b) => b.y - a.y)
-    .map(r => r.items.sort((a,b) => a.x - b.x).map(i => i.text).join(' ').replace(/\s+/g,' ').trim())
-    .filter(Boolean);
+  return rows.sort((a,b) => b.y - a.y).map(r => {
+    const cells = r.items.sort((a,b) => a.x - b.x).map(i => ({ x:Number(i.x.toFixed(2)), text:i.text }));
+    return { y:Number(r.y.toFixed(2)), cells, text:cells.map(i=>i.text).join(' ').replace(/\s+/g,' ').trim() };
+  }).filter(r => r.text);
 }
 
 export default async function handler(req, res) {
@@ -52,34 +53,21 @@ export default async function handler(req, res) {
     const html = await fetchText(OFFERS_URL);
     const pdfLinks = extractPdfLinks(html);
     if (!pdfLinks.length) return res.status(404).json({ ok:false, error:'no_pdfs' });
-
-    const canvas = await import('@napi-rs/canvas');
-    if (!globalThis.DOMMatrix && canvas.DOMMatrix) globalThis.DOMMatrix = canvas.DOMMatrix;
-    if (!globalThis.ImageData && canvas.ImageData) globalThis.ImageData = canvas.ImageData;
-    if (!globalThis.Path2D && canvas.Path2D) globalThis.Path2D = canvas.Path2D;
-
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
     const diagnostics = [];
 
     for (const url of pdfLinks.slice(0, 2)) {
-      const data = await fetchBuffer(url);
-      const loadingTask = pdfjs.getDocument({ data, disableWorker: true });
-      const pdf = await loadingTask.promise;
-      const pages = [];
-
-      for (let p = 1; p <= Math.min(pdf.numPages, 3); p++) {
-        const page = await pdf.getPage(p);
-        const textContent = await page.getTextContent();
+      const buffer = await fetchBuffer(url);
+      const pageLayouts = [];
+      let pageIndex = 0;
+      const pagerender = async pageData => {
+        const textContent = await pageData.getTextContent({ normalizeWhitespace:false, disableCombineTextItems:false });
+        pageIndex += 1;
         const rows = reconstructRows(textContent.items);
-        pages.push({
-          page: p,
-          items: textContent.items.length,
-          rows: rows.length,
-          sample_rows: rows.slice(0, 60)
-        });
-      }
-
-      diagnostics.push({ url, pages });
+        pageLayouts.push({ page:pageIndex, items:textContent.items.length, rows:rows.length, sample_rows:rows.slice(0,80) });
+        return rows.map(r => r.text).join('\n');
+      };
+      const parsed = await pdfParse(buffer, { pagerender, max:3 });
+      diagnostics.push({ url, pages_reported:parsed.numpages, text_chars:(parsed.text || '').length, pages:pageLayouts });
     }
 
     return res.status(200).json({ ok:true, pdfs_found:pdfLinks.length, diagnostics });
