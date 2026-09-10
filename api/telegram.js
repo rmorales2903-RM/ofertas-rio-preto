@@ -169,15 +169,15 @@ const PRODUCT_INTENTS = {
   },
   tomate: {
     accept: /(^|[^a-z])tomate([^a-z]|$)/,
-    reject: /(molho|extrato|ketchup|tomate pelado|tomate seco|polpa|suco|tempero|sopa)/
+    reject: /(molho|extrato|ketchup|tomate pelado|tomate seco|polpa|suco|tempero|sopa|macarrao instantaneo|miojo|sabor tomate|aroma)/
   },
   uva: {
     accept: /(^|[^a-z])uva([^a-z]|$)/,
-    reject: /(suco|nectar|refresco|bebida|refrigerante|vinho|espumante|gelatina|iogurte|leite fermentado|sabor uva|aroma)/
+    reject: /(suco|nectar|refresco|bebida|refrigerante|vinho|espumante|gelatina|iogurte|leite fermentado|polpa|isotonico|energetico|sabor uva|aroma)/
   },
   manga: {
     accept: /(^|[^a-z])manga([^a-z]|$)/,
-    reject: /(suco|nectar|refresco|bebida|polpa|sorvete|iogurte|sabor manga|aroma)/
+    reject: /(suco|nectar|refresco|bebida|polpa|sorvete|iogurte|cha|sabor manga|aroma)/
   },
   maionese: {
     accept: /(^|[^a-z])maionese([^a-z]|$)/,
