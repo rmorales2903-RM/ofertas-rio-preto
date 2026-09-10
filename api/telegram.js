@@ -162,6 +162,29 @@ async function searchOffers(sql, term, limit = 10) {
   const normalized = normalizeSearch(term);
   const pattern = `%${normalized}%`;
 
+  if (normalized === 'leite') {
+    return sql`
+      select o.id, o.source_product_name, o.source_url, o.regular_price, o.offer_price,
+             o.loyalty_required, o.loyalty_label, o.valid_until, p.canonical_name,
+             c.name as category, s.name as store, sm.name as supermarket
+      from offers o
+      join stores s on s.id = o.store_id
+      join supermarkets sm on sm.id = s.supermarket_id
+      left join products p on p.id = o.product_id
+      left join categories c on c.id = p.category_id
+      where o.is_active = true
+        and (o.valid_until is null or o.valid_until >= current_date)
+        and translate(lower(coalesce(p.canonical_name, o.source_product_name, '')), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') ~ '(^|[^a-z])leite([^a-z]|$)'
+        and translate(lower(coalesce(p.canonical_name, o.source_product_name, '')), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') !~ '(chocolate|ao leite|doce de leite|creme de leite|leite condensado|leite em po|leite po|leite fermentado|cafe com leite|bebida lactea|sabonete|desodorante|racao|leite de coco|pudim)'
+      order by o.offer_price desc,
+        case when o.regular_price > o.offer_price
+          then (o.regular_price - o.offer_price) / o.regular_price
+          else 0 end desc,
+        coalesce(p.canonical_name, o.source_product_name) asc
+      limit ${limit}
+    `;
+  }
+
   return sql`
     select o.id, o.source_product_name, o.source_url, o.regular_price, o.offer_price,
            o.loyalty_required, o.loyalty_label, o.valid_until, p.canonical_name,
