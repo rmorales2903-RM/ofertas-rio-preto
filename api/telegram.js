@@ -9,7 +9,7 @@ const MENU = {
     [{ text: '🥓 Frios e Embutidos' }, { text: '🥤 Bebidas' }],
     [{ text: '🍫 Doces e Chocolates' }, { text: '🛒 Mercearia' }],
     [{ text: '🥬 Hortifruti' }, { text: '❄️ Congelados' }],
-    [{ text: '🔥 Maiores descontos' }, { text: '🏆 Melhor preço' }],
+    [{ text: '🔥 Maiores descontos %' }, { text: '🏆 Melhor preço' }],
     [{ text: '⭐ Favoritos' }, { text: '📋 Menu' }]
   ],
   resize_keyboard: true,
@@ -90,7 +90,7 @@ function formatOffer(o, index) {
   const club = o.loyalty_required
     ? `\n🔐 <b>Preço clube:</b> ${escapeHtml(o.loyalty_label || 'sim')}`
     : '';
-  const oldPrice = regular && regular > offer ? `\nDe: <s>${brl(regular)}</s>` : '';
+  const oldPrice = regular && regular > offer ? `\nPreço normal: <s>${brl(regular)}</s>` : '';
   const discountLine = discount ? `  •  <b>-${discount.toLocaleString('pt-BR')}%</b>` : '';
   const validLine = validity ? `\n📅 Válido até: ${validity}` : '';
   const link = o.source_url ? `\n🔗 <a href="${escapeHtml(o.source_url)}">Ver oferta</a>` : '';
@@ -143,9 +143,34 @@ async function fetchOffers(sql, category = null, limit = 5) {
   `;
 }
 
+async function fetchBiggestDiscounts(sql, limit = 10) {
+  return sql`
+    select o.id, o.source_product_name, o.source_url, o.regular_price,
+           o.offer_price, o.loyalty_required, o.loyalty_label, o.valid_until,
+           p.canonical_name, c.name as category,
+           s.name as store, sm.name as supermarket,
+           round((((o.regular_price - o.offer_price) / o.regular_price) * 100)::numeric, 1) as discount_pct
+    from offers o
+    join stores s on s.id = o.store_id
+    join supermarkets sm on sm.id = s.supermarket_id
+    left join products p on p.id = o.product_id
+    left join categories c on c.id = p.category_id
+    where o.is_active = true
+      and (o.valid_until is null or o.valid_until >= current_date)
+      and o.regular_price is not null
+      and o.regular_price > 0
+      and o.offer_price >= 0
+      and o.offer_price < o.regular_price
+    order by ((o.regular_price - o.offer_price) / o.regular_price) desc,
+             (o.regular_price - o.offer_price) desc,
+             o.offer_price asc
+    limit ${limit}
+  `;
+}
+
 async function sendOfferList(chatId, title, offers) {
   if (!offers.length) {
-    await sendTelegram(chatId, `🔎 <b>${escapeHtml(title)}</b>\n\nAinda não encontrei oferta ativa nessa seleção.` , MENU);
+    await sendTelegram(chatId, `🔎 <b>${escapeHtml(title)}</b>\n\nAinda não encontrei oferta ativa nessa seleção.`, MENU);
     return;
   }
 
@@ -221,9 +246,14 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true });
     }
 
-    if (text === '🔥 maiores descontos' || text === 'maiores descontos') {
-      const offers = await fetchOffers(sql, null, 5);
-      await sendOfferList(chatId, 'Maiores descontos', offers);
+    if (
+      text === '🔥 maiores descontos %' ||
+      text === '🔥 maiores descontos' ||
+      text === 'maiores descontos' ||
+      text === 'maiores descontos %'
+    ) {
+      const offers = await fetchBiggestDiscounts(sql, 10);
+      await sendOfferList(chatId, 'Maiores descontos por percentual', offers);
       return json(res, 200, { ok: true });
     }
 
