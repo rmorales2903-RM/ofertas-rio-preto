@@ -13,9 +13,11 @@ const STORE_ADDRESS = 'Av. Jornalista Roberto Marinho, 3239 - Jd. Primavera - S�
 function normalizeText(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
+
 function normalizeKey(value) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 180);
 }
+
 function decodeHtml(value) {
   return String(value || '').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&nbsp;/gi, ' ');
 }
@@ -43,11 +45,13 @@ async function fetchText(url) {
   if (!r.ok) throw new Error(`Compre Mix ${r.status}: ${url}`);
   return r.text();
 }
+
 async function fetchBuffer(url) {
   const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 Promo-Supermercado-Bot/1.0' } });
   if (!r.ok) throw new Error(`Compre Mix PDF ${r.status}: ${url}`);
   return Buffer.from(await r.arrayBuffer());
 }
+
 function extractPdfLinks(html) {
   const links = new Set();
   const re = /href=["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi;
@@ -75,13 +79,34 @@ function parseValidity(text) {
   }
   return { validFrom:null, validUntil:null };
 }
+
 function moneyToNumber(value) {
-  const n = Number(String(value || '').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,''));
+  const cleaned = String(value || '').replace(/\s+/g,'').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,'');
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 }
-function cleanProductName(value) {
-  return String(value || '').replace(/cliente\s+clube.*$/i,'').replace(/oferta\s+especial.*$/i,'').replace(/\s+/g,' ').replace(/^[-•*\s]+|[-•*\s]+$/g,'').trim();
+
+function extractPrices(text) {
+  const matches = [];
+  const re = /(?:R\s*\$\s*([0-9.]+\s*,\s*[0-9]{2})|([0-9.]+\s*,\s*[0-9]{2})\s*R\s*\$)/gi;
+  for (const m of String(text || '').matchAll(re)) {
+    const raw = m[1] || m[2];
+    const value = moneyToNumber(raw);
+    if (value != null) matches.push({ value, index:m.index || 0, length:m[0].length });
+  }
+  return matches;
 }
+
+function cleanProductName(value) {
+  return String(value || '')
+    .replace(/cliente\s+clube.*$/i,'')
+    .replace(/oferta\s+especial.*$/i,'')
+    .replace(/\bcada\b/gi,' ')
+    .replace(/\s+/g,' ')
+    .replace(/^[-•*\s]+|[-•*\s]+$/g,'')
+    .trim();
+}
+
 function looksLikeProductName(s) {
   const n = normalizeText(s);
   if (s.length < 4 || s.length > 180) return false;
@@ -95,57 +120,95 @@ function parseOffersFromPdfText(text, sourceUrl) {
   const lines = String(text || '').split(/\r?\n/).map(x => x.replace(/\s+/g,' ').trim()).filter(Boolean);
   const rows = [];
   const seen = new Set();
-  const priceRe = /R\s*\$\s*([0-9.]+\s*,\s*[0-9]{2})/gi;
 
+  // Layout A: product and price on the same or adjacent lines.
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const priceMatches = [...line.matchAll(priceRe)];
+    const priceMatches = extractPrices(line);
     if (!priceMatches.length) continue;
-
-    const isClubLine = /cliente\s+clube/i.test(line);
-    if (isClubLine) continue;
+    if (/cliente\s+clube/i.test(line)) continue;
 
     let namePart = line.slice(0, priceMatches[0].index).trim();
     if (!looksLikeProductName(namePart)) {
-      const candidates = [lines[i-1], lines[i-2], lines[i-3]].filter(Boolean).filter(looksLikeProductName);
+      const after = line.slice(priceMatches[0].index + priceMatches[0].length).trim();
+      if (looksLikeProductName(after)) namePart = after;
+    }
+    if (!looksLikeProductName(namePart)) {
+      const candidates = [lines[i-1], lines[i-2], lines[i-3], lines[i+1]].filter(Boolean).filter(looksLikeProductName);
       namePart = candidates[0] || '';
     }
+
     const name = cleanProductName(namePart);
     if (!looksLikeProductName(name)) continue;
 
-    let regular = moneyToNumber(priceMatches[0][1]);
+    let regular = priceMatches[0].value;
     let offer = regular;
     let loyaltyRequired = false;
     let loyaltyLabel = null;
 
     const window = [line, lines[i+1] || '', lines[i+2] || ''].join(' ');
-    const clubMatch = window.match(/cliente\s+clube\s+paga\s+R\s*\$\s*([0-9.]+\s*,\s*[0-9]{2})/i);
-    if (clubMatch) {
-      const clubPrice = moneyToNumber(clubMatch[1]);
+    const clubPrices = extractPrices(window);
+    if (/cliente\s+clube/i.test(window) && clubPrices.length > 1) {
+      const clubPrice = clubPrices[clubPrices.length - 1].value;
       if (clubPrice > 0 && clubPrice <= regular) {
         offer = clubPrice;
         loyaltyRequired = true;
         loyaltyLabel = 'Cliente CLUBE';
       }
     } else if (priceMatches.length >= 2) {
-      const p2 = moneyToNumber(priceMatches[priceMatches.length-1][1]);
+      const p2 = priceMatches[priceMatches.length - 1].value;
       if (p2 > 0 && p2 <= regular) offer = p2;
     }
-    if (!offer || offer <= 0 || offer > 100000) continue;
 
+    if (!offer || offer <= 0 || offer > 100000) continue;
     const signature = `${normalizeKey(name)}|${offer}|${sourceUrl}`;
     if (seen.has(signature)) continue;
     seen.add(signature);
-    rows.push({
-      canonical_name:name, brand:null, category_name:categoryFor(name), normalized_key:normalizeKey(`compremix-${name}`),
-      source_product_name:name, source_url:sourceUrl, regular_price:regular, offer_price:offer,
-      loyalty_required:loyaltyRequired, loyalty_label:loyaltyLabel,
-      valid_from:validity.validFrom, valid_until:validity.validUntil,
-      source_hash:createHash('sha256').update(`compremix|${sourceUrl}|${normalizeKey(name)}|${offer}`).digest('hex').slice(0,48),
-      raw_payload:{source:'compremix-pdf',source_url:sourceUrl,source_line:line}
-    });
+    rows.push(buildRow(name, regular, offer, loyaltyRequired, loyaltyLabel, validity, sourceUrl, line));
   }
+
+  // Layout B used by the current Compre Mix PDF: e.g. "CADA 5 ,99 R$ SABAO PO APYCE 2,2KG ...".
+  // Parse the flattened text by taking the product description after each price up to the next price.
+  if (!rows.length) {
+    const flat = String(text || '').replace(/\s+/g,' ').trim();
+    const prices = extractPrices(flat);
+    for (let i = 0; i < prices.length; i++) {
+      const p = prices[i];
+      const next = prices[i+1];
+      const segment = flat.slice(p.index + p.length, next ? next.index : Math.min(flat.length, p.index + p.length + 220));
+      let name = cleanProductName(segment);
+      name = name.replace(/\b(?:cada|ofertas?|validas?|enquanto houver estoque|respeitando o periodo da promocao)\b.*$/i,'').trim();
+      if (!looksLikeProductName(name)) continue;
+      if (name.length > 120) name = name.slice(0,120).trim();
+      const offer = p.value;
+      if (!offer || offer <= 0 || offer > 100000) continue;
+      const signature = `${normalizeKey(name)}|${offer}|${sourceUrl}`;
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      rows.push(buildRow(name, offer, offer, false, null, validity, sourceUrl, segment));
+    }
+  }
+
   return rows;
+}
+
+function buildRow(name, regular, offer, loyaltyRequired, loyaltyLabel, validity, sourceUrl, sourceLine) {
+  return {
+    canonical_name:name,
+    brand:null,
+    category_name:categoryFor(name),
+    normalized_key:normalizeKey(`compremix-${name}`),
+    source_product_name:name,
+    source_url:sourceUrl,
+    regular_price:regular,
+    offer_price:offer,
+    loyalty_required:loyaltyRequired,
+    loyalty_label:loyaltyLabel,
+    valid_from:validity.validFrom,
+    valid_until:validity.validUntil,
+    source_hash:createHash('sha256').update(`compremix|${sourceUrl}|${normalizeKey(name)}|${offer}`).digest('hex').slice(0,48),
+    raw_payload:{source:'compremix-pdf',source_url:sourceUrl,source_line:String(sourceLine || '').slice(0,500)}
+  };
 }
 
 async function ensureStore(sql) {
@@ -201,7 +264,7 @@ export default async function handler(req,res) {
         const parsed=await pdfParse(buffer);
         const pdfText=parsed.text || '';
         const rows=parseOffersFromPdfText(pdfText,url);
-        diagnostics.push({url,text_chars:pdfText.length,lines:pdfText.split(/\r?\n/).filter(Boolean).length,rows:rows.length,sample:pdfText.replace(/\s+/g,' ').slice(0,240)});
+        diagnostics.push({url,text_chars:pdfText.length,lines:pdfText.split(/\r?\n/).filter(Boolean).length,price_tokens:extractPrices(pdfText).length,rows:rows.length,sample:pdfText.replace(/\s+/g,' ').slice(0,320)});
         if (!rows.length) continue;
         pdfsParsed++; allRows.push(...rows);
       } catch(e) { warnings.push({url,error:String(e?.message||e)}); }
