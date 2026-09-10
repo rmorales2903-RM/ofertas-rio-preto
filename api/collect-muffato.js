@@ -96,7 +96,7 @@ function makeRecords(products) {
 async function saveBatch(sql, storeId, rows) {
   if (!rows.length) return 0;
   const payload = JSON.stringify(rows);
-  const result = await sql`
+  await sql`
     with input as (
       select * from jsonb_to_recordset(${payload}::jsonb) as x(
         canonical_name text,
@@ -128,9 +128,9 @@ async function saveBatch(sql, storeId, rows) {
         updated_at = now()
       returning id, normalized_key
     ), offer_input as (
-      select pi.*, p.id as product_id
+      select pi.*, up.id as product_id
       from product_input pi
-      join products p on p.normalized_key = pi.normalized_key
+      join upsert_products up on up.normalized_key = pi.normalized_key
     ), upsert_offers as (
       insert into offers (
         store_id, product_id, source_product_name, source_url, image_url,
@@ -168,7 +168,6 @@ async function saveBatch(sql, storeId, rows) {
         and coalesce(ph.regular_price, -1) = coalesce(u.regular_price, -1)
         and ph.observed_at > now() - interval '5 hours'
     )
-    returning offer_id
   `;
   return rows.length;
 }
